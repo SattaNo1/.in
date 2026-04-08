@@ -2,7 +2,7 @@
 
 
 import { db } from './firebase.js';
-import { collection, doc, getDoc, getDocs, updateDoc, query, where, increment, serverTimestamp, setDoc, onSnapshot, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+import { collection, doc, getDoc, getDocs, updateDoc, addDoc, query, where, increment, serverTimestamp, setDoc, onSnapshot, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
 // ==========================================
 // 1. TAB SWITCHING LOGIC
@@ -20,7 +20,7 @@ window.adminTab = function(tabName) {
 
 
 // ==========================================
-// 2. REAL-TIME DATA LOADERS (FIXED UNDEFINED ISSUE)
+// 2. REAL-TIME DATA LISTENERS (LIVE SYNC)
 // ==========================================
 function startAdminListeners() {
   
@@ -41,7 +41,7 @@ function startAdminListeners() {
         let numDisp = b.type === 'main' ? b.number : (b.mainNumber || '--');
         let harupDisp = b.type === 'harup' ? b.number : (b.harupNumber || '--');
         
-        let dateDisp = b.date || (b.createdAt?.toDate ? new Date(b.createdAt.toDate()).toLocaleDateString() : '--');
+        let dateDisp = b.date || (b.createdAt?.toDate ? new Date(b.createdAt.toDate()).toLocaleDateString('en-IN') : '--');
         let userDisp = b.userName || b.userEmail || 'User';
 
         // Status Colors
@@ -79,7 +79,7 @@ function startAdminListeners() {
   });
 
 
-  // ---> B. LOAD PAYMENTS (WITH APPROVE/REJECT BUTTONS)
+  // ---> B. LOAD PAYMENTS (WITH APPROVE/REJECT)
   onSnapshot(query(collection(db, 'payments'), orderBy('createdAt', 'desc'), limit(50)), (snap) => {
     let payHtml = '';
     let dashPayHtml = '';
@@ -92,7 +92,7 @@ function startAdminListeners() {
     } else {
       snap.forEach(docSnap => {
         let p = docSnap.data();
-        let dateDisp = p.createdAt?.toDate ? new Date(p.createdAt.toDate()).toLocaleDateString() : '--';
+        let dateDisp = p.createdAt?.toDate ? new Date(p.createdAt.toDate()).toLocaleDateString('en-IN') : '--';
         let userDisp = p.userName || p.userEmail || 'User';
 
         if(p.status === 'pending') pendingCount++;
@@ -152,7 +152,7 @@ function startAdminListeners() {
     } else {
       snap.forEach(docSnap => {
         let u = docSnap.data();
-        let dateDisp = u.createdAt?.toDate ? new Date(u.createdAt.toDate()).toLocaleDateString() : '--';
+        let dateDisp = u.createdAt?.toDate ? new Date(u.createdAt.toDate()).toLocaleDateString('en-IN') : '--';
         userHtml += `<tr>
           <td>${u.name || 'User'}</td>
           <td>${u.email || '--'}</td>
@@ -216,7 +216,7 @@ window.approvePayment = async function(docId, userId, amount) {
 
     alert("✅ Payment Approved! Money added to user wallet.");
   } catch(e) {
-    console.error(e); alert("❌ Error approving payment.");
+    console.error(e); alert("❌ Error approving payment. Check console.");
   }
 };
 
@@ -269,6 +269,7 @@ window.addResult = async function() {
       let isWinner = false;
       let winAmount = 0;
 
+      // Auto check win for Jodi or Harup
       if (bet.type === "main" && bet.number == winNumber) {
         isWinner = true;
         winAmount = bet.amount * jodiMultiplier; 
@@ -288,7 +289,7 @@ window.addResult = async function() {
           updatedAt: serverTimestamp()
         });
 
-        // Add winning amount to user's wallet
+        // Add winning amount to user's wallet automatically
         const userRef = doc(db, "users", bet.userId);
         await updateDoc(userRef, {
           walletBalance: increment(winAmount)
@@ -311,6 +312,7 @@ window.addResult = async function() {
       }
     }
 
+    // Save final result to Results Database
     await setDoc(doc(collection(db, "results")), {
         number: winNumber || "--",
         harup: winHarup || "-",
@@ -385,25 +387,26 @@ window.adjustWallet = async function() {
 };
 
 
-// INITIALIZE LISTENERS ON LOAD
+// ==========================================
+// 7. INITIALIZE LISTENERS & PASSWORD CHECK
+// ==========================================
 window.addEventListener('DOMContentLoaded', () => {
-  // We only start loading data if the admin panel is visible 
-  // (i.e. they passed the password screen). 
-  // For safety, let's bind it to the Login button in admin.html
   const loginBtn = document.querySelector('.login-btn-custom');
   if(loginBtn) {
-    const originalCheckPass = window.checkPassword;
+    // Override the HTML password check
     window.checkPassword = function() {
       var passInput = document.getElementById('adminPassword').value;
       if (passInput === 'No1Satta@1998') {
         document.getElementById('adminLoginPage').classList.add('hidden');
         document.getElementById('adminPanel').classList.remove('hidden');
-        startAdminListeners(); // DATA TABHI LOAD HOGA JAB PASSWORD SAHI HOGA!
+        // Load data ONLY when password is correct
+        startAdminListeners(); 
       } else {
         document.getElementById('errorMsg').style.display = 'block';
       }
     };
   } else {
+    // If login button not found, just start the listeners (fallback)
     startAdminListeners();
   }
 });
