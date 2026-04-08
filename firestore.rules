@@ -1,0 +1,81 @@
+// Firebase Security Rules — Satta No.1
+// Copy this to Firebase Console > Firestore > Rules
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isAuth() { return request.auth != null; }
+    function isOwner(userId) { return request.auth.uid == userId; }
+    function isAdmin() {
+      return isAuth() && exists(/databases/$(database)/documents/settings/admins) &&
+        request.auth.token.email in get(/databases/$(database)/documents/settings/admins).data.emails;
+    }
+    
+    // Users — read own, admin reads all
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuth() && isOwner(userId);
+      allow update: if isOwner(userId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    // Bets — user creates own bets, admin updates
+    match /bets/{betId} {
+      allow read: if isAuth() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuth();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    // Payments — user creates own, admin manages
+    match /payments/{payId} {
+      allow read: if isAuth() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuth();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    // Results — anyone can read, only admin writes
+    match /results/{resultId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    // Wallet transactions — user reads own
+    match /wallet_transactions/{txId} {
+      allow read: if isAuth() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuth() || isAdmin();
+      allow update, delete: if isAdmin();
+    }
+    
+    // Referrals — user reads own
+    match /referrals/{refId} {
+      allow read: if isAuth() && (resource.data.referrerId == request.auth.uid || isAdmin());
+      allow create: if isAuth();
+      allow update: if isAdmin();
+    }
+    
+    // Notifications — user reads own
+    match /notifications/{notifId} {
+      allow read: if isAuth() && resource.data.userId == request.auth.uid;
+      allow create: if isAuth() || isAdmin();
+      allow update: if isAuth() && resource.data.userId == request.auth.uid;
+      allow delete: if isAdmin();
+    }
+    
+    // Settings — anyone reads, only admin writes
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    // Withdrawals
+    match /withdrawals/{wId} {
+      allow read: if isAuth() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuth();
+      allow update: if isAdmin();
+    }
+  }
+}
