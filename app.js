@@ -1,3 +1,6 @@
+
+
+
 // Satta No.1 — Main App Logic
 import {
   auth, db, googleProvider,
@@ -10,13 +13,16 @@ import {
 // ─── STATE ───────────────────────────────────────────────────────────
 let currentUser = null;
 let userData = null;
-let gameSettings = { multiplier: 10, harupMultiplier: 5, minBet: 10, referralBonus: 20 };
+let gameSettings = { multiplier: 90, harupMultiplier: 9, minBet: 10, referralBonus: 20 };
 let paymentSettings = { upiId: 'sattano1@upi', payName: 'Satta No.1', enabled: true };
 let deferredInstallPrompt = null;
-let selectedMain = null;
-let selectedHarup = null;
 let currentHistoryTab = 'bets';
 let unsubscribers = [];
+
+// New Betting States
+let playMode = 'single'; 
+let singleSelection = null; 
+let multiSelection = []; 
 
 // ─── PWA INSTALL ─────────────────────────────────────────────────────
 window.addEventListener('beforeinstallprompt', (e) => {
@@ -53,6 +59,7 @@ onAuthStateChanged(auth, async (user) => {
     showApp();
     loadSettings();
     startListeners();
+    buildGrids(); // Build number grids once logged in
   } else {
     currentUser = null;
     userData = null;
@@ -72,7 +79,6 @@ async function initUser(user) {
   const snap = await getDoc(userRef);
 
   if (!snap.exists()) {
-    // New user
     const refCode = generateRefCode(user.displayName);
     const refBy = new URLSearchParams(window.location.search).get('ref') || '';
 
@@ -92,10 +98,7 @@ async function initUser(user) {
       lastLogin: serverTimestamp()
     });
 
-    // Credit referrer if valid
-    if (refBy) {
-      await creditReferrer(refBy, user);
-    }
+    if (refBy) await creditReferrer(refBy, user);
     userData = (await getDoc(userRef)).data();
   } else {
     await updateDoc(userRef, { lastLogin: serverTimestamp() });
@@ -152,7 +155,7 @@ async function loadSettings() {
     if (pSnap.exists()) Object.assign(paymentSettings, pSnap.data());
     document.getElementById('displayUpiId').textContent = paymentSettings.upiId || 'sattano1@upi';
     generateQR();
-  } catch (e) { /* settings might not exist yet */ }
+  } catch (e) { console.log(e); }
 }
 
 // ─── UI HELPERS ───────────────────────────────────────────────────────
@@ -177,7 +180,6 @@ function updateUI() {
   document.getElementById('headerBalance').textContent = bal;
   document.getElementById('walletBalance').textContent = bal;
 
-  // Avatar
   const img = currentUser.photoURL;
   if (img) {
     document.getElementById('headerAvatar').style.backgroundImage = `url(${img})`;
@@ -189,7 +191,6 @@ function updateUI() {
   document.getElementById('pstatWins').textContent = userData.totalWins || 0;
   document.getElementById('pstatBonus').textContent = '₹' + (userData.totalBonus || 0);
 
-  // Referral
   document.getElementById('userRefCode').textContent = userData.referralCode || '--';
   document.getElementById('userRefLink').textContent = `${location.origin}?ref=${userData.referralCode}`;
   document.getElementById('refTotal').textContent = userData.totalReferrals || 0;
@@ -220,7 +221,6 @@ function startListeners() {
   unsubscribers.forEach(u => u());
   unsubscribers = [];
 
-  // Live wallet balance
   const unsub1 = onSnapshot(doc(db, 'users', currentUser.uid), (snap) => {
     if (snap.exists()) {
       userData = snap.data();
@@ -228,7 +228,6 @@ function startListeners() {
     }
   });
 
-  // Live result
   const unsub2 = onSnapshot(
     query(collection(db, 'results'), orderBy('createdAt', 'desc'), limit(1)),
     (snap) => {
@@ -245,7 +244,6 @@ function startListeners() {
     }
   );
 
-  // Live last 10 results
   const unsub3 = onSnapshot(
     query(collection(db, 'results'), where('status', '==', 'closed'), orderBy('createdAt', 'desc'), limit(10)),
     (snap) => renderRecentResults(snap.docs.map(d => d.data()))
@@ -272,7 +270,7 @@ function startCountdown() {
   const tick = () => {
     const now = new Date();
     const target = new Date();
-    target.setHours(21, 0, 0, 0); // 9 PM daily result
+    target.setHours(21, 0, 0, 0); 
     if (now > target) target.setDate(target.getDate() + 1);
     const diff = target - now;
     const h = String(Math.floor(diff / 3600000)).padStart(2, '0');
@@ -284,14 +282,20 @@ function startCountdown() {
   tick(); setInterval(tick, 1000);
 }
 
-// ─── NUMBER GRID ──────────────────────────────────────────────────────
+
+// ==========================================
+// NAYA BETTING LOGIC (SINGLE & MULTIPLE)
+// ==========================================
+
 function buildGrids() {
   const mainGrid = document.getElementById('mainGrid');
   if (mainGrid && !mainGrid.children.length) {
     for (let i = 1; i <= 100; i++) {
+      const numStr = i.toString().padStart(2, '0'); // Example: 01, 02.. 100
       const b = document.createElement('button');
-      b.className = 'num-btn'; b.textContent = i;
-      b.onclick = () => selectMain(i, b);
+      b.className = 'num-btn'; b.textContent = numStr;
+      b.id = `btn-main-${numStr}`;
+      b.onclick = () => window.selectNumber('main', numStr);
       mainGrid.appendChild(b);
     }
   }
@@ -300,71 +304,128 @@ function buildGrids() {
     for (let i = 1; i <= 9; i++) {
       const b = document.createElement('button');
       b.className = 'harup-btn'; b.textContent = i;
-      b.onclick = () => selectHarup(i, b);
+      b.id = `btn-harup-${i}`;
+      b.onclick = () => window.selectNumber('harup', i.toString());
       harupGrid.appendChild(b);
     }
   }
 }
-buildGrids();
 
-function selectMain(n, el) {
-  document.querySelectorAll('.num-btn').forEach(b => b.classList.remove('selected'));
-  el.classList.add('selected');
-  selectedMain = n;
-  updateBetSummary();
-}
-
-function selectHarup(n, el) {
-  document.querySelectorAll('.harup-btn').forEach(b => b.classList.remove('selected'));
-  el.classList.add('selected');
-  selectedHarup = n;
-  updateBetSummary();
-}
-
-function updateBetSummary() {
-  const amount = parseInt(document.getElementById('betAmount')?.value || 0);
-  const el = document.getElementById('betSummary');
-  if (!el) return;
-  if (selectedMain && selectedHarup && amount >= 10) {
-    const winMain = amount * (gameSettings.multiplier || 10);
-    const winHarup = amount * (gameSettings.harupMultiplier || 5);
-    el.innerHTML = `Number: <b style="color:var(--gold)">${selectedMain}</b> | Harup: <b style="color:var(--gold)">${selectedHarup}</b> | Amount: <b style="color:var(--gold)">₹${amount}</b> | Potential win: <b style="color:var(--green)">₹${winMain}</b>`;
+window.setPlayMode = function(mode) {
+  playMode = mode;
+  document.getElementById('modeSingleBtn').classList.toggle('active', mode === 'single');
+  document.getElementById('modeMultiBtn').classList.toggle('active', mode === 'multi');
+  
+  if(mode === 'single') {
+    document.getElementById('singleBetBox').classList.remove('hidden');
+    document.getElementById('multiBetBox').classList.add('hidden');
   } else {
-    el.textContent = 'Select number, harup and enter amount';
+    document.getElementById('singleBetBox').classList.add('hidden');
+    document.getElementById('multiBetBox').classList.remove('hidden');
   }
-}
-document.getElementById('betAmount')?.addEventListener('input', updateBetSummary);
-
-window.setAmount = (n) => {
-  document.getElementById('betAmount').value = n;
-  document.querySelectorAll('.amt-chip').forEach(c => c.classList.toggle('active', parseInt(c.textContent.replace('₹','')) === n));
-  updateBetSummary();
+  
+  singleSelection = null;
+  multiSelection = [];
+  updateGridUI();
+  updateMultiCartUI();
+  document.getElementById('singleSelectedText').innerText = "Select a Jodi or Harup Number";
+  document.getElementById('singleBetAmount').value = '';
 };
 
-// ─── SUBMIT BET ───────────────────────────────────────────────────────
-window.submitBet = async () => {
-  if (!currentUser || !userData) return showToast('Please login first', 'error');
-  const amount = parseInt(document.getElementById('betAmount')?.value || 0);
-  if (!selectedMain) return showToast('Please select a main number', 'error');
-  if (!selectedHarup) return showToast('Please select a harup number', 'error');
-  if (amount < (gameSettings.minBet || 10)) return showToast(`Minimum bet is ₹${gameSettings.minBet || 10}`, 'error');
-  if ((userData.walletBalance || 0) < amount) return showToast('Insufficient wallet balance', 'error');
+window.selectNumber = function(type, num) {
+  if (playMode === 'single') {
+    singleSelection = { type: type, number: num };
+    let typeText = type === 'main' ? 'JODI' : 'HARUP';
+    document.getElementById('singleSelectedText').innerText = `Selected: ${typeText} - ${num}`;
+  } else {
+    let index = multiSelection.findIndex(item => item.type === type && item.number === num);
+    if (index > -1) {
+      multiSelection.splice(index, 1); 
+    } else {
+      multiSelection.push({ type: type, number: num, amount: '' }); 
+    }
+    updateMultiCartUI();
+  }
+  updateGridUI();
+};
 
-  const btn = document.getElementById('submitBetBtn');
-  btn.disabled = true; btn.textContent = 'Placing bet...';
+function updateGridUI() {
+  document.querySelectorAll('.num-btn, .harup-btn').forEach(btn => btn.classList.remove('selected'));
+  if (playMode === 'single' && singleSelection) {
+    let btn = document.getElementById(`btn-${singleSelection.type}-${singleSelection.number}`);
+    if(btn) btn.classList.add('selected');
+  } else if (playMode === 'multi') {
+    multiSelection.forEach(item => {
+      let btn = document.getElementById(`btn-${item.type}-${item.number}`);
+      if(btn) btn.classList.add('selected');
+    });
+  }
+}
+
+window.updateMultiCartUI = function() {
+  const listDiv = document.getElementById('multiBetList');
+  if (multiSelection.length === 0) {
+    listDiv.innerHTML = '<div class="empty-slip">Tap numbers to add them to your slip</div>';
+    document.getElementById('multiTotalAmt').innerText = "0";
+    return;
+  }
+
+  let html = '';
+  multiSelection.forEach((item, index) => {
+    let typeText = item.type === 'main' ? 'Jodi' : 'Harup';
+    html += `
+      <div class="slip-item">
+        <div class="slip-info">
+          <span class="slip-title">${typeText} - ${item.number}</span>
+        </div>
+        <input type="number" class="slip-input" placeholder="₹ Amount" value="${item.amount}" oninput="updateCartAmount(${index}, this.value)" min="10">
+        <button class="slip-del" onclick="selectNumber('${item.type}', '${item.number}')">X</button>
+      </div>
+    `;
+  });
+  listDiv.innerHTML = html;
+  calculateMultiTotal();
+};
+
+window.updateCartAmount = function(index, value) {
+  multiSelection[index].amount = value;
+  calculateMultiTotal();
+};
+
+function calculateMultiTotal() {
+  let total = 0;
+  multiSelection.forEach(item => {
+    let amt = parseInt(item.amount);
+    if(!isNaN(amt) && amt > 0) total += amt;
+  });
+  document.getElementById('multiTotalAmt').innerText = total;
+}
+
+// ─── SUBMIT SINGLE BET ────────────────────────────────────────────────
+window.submitSingleBet = async function() {
+  if (!currentUser || !userData) return showToast('Please login first', 'error');
+  if (!singleSelection) return showToast('❌ Please select a number first!', 'error');
+  
+  let amount = parseInt(document.getElementById('singleBetAmount').value);
+  let minB = gameSettings.minBet || 10;
+  if (isNaN(amount) || amount < minB) return showToast(`❌ Minimum bet amount is ₹${minB}`, 'error');
+  if ((userData.walletBalance || 0) < amount) return showToast('❌ Insufficient Wallet Balance!', 'error');
 
   try {
     const now = new Date();
+    const dateStr = now.toISOString().split('T')[0];
+    const timeStr = now.toTimeString().split(' ')[0];
+
     await addDoc(collection(db, 'bets'), {
       userId: currentUser.uid,
       userName: currentUser.displayName,
       userEmail: currentUser.email,
-      mainNumber: selectedMain,
-      harupNumber: selectedHarup,
+      type: singleSelection.type,
+      number: singleSelection.number,
       amount: amount,
       status: 'pending',
-      date: now.toISOString().split('T')[0],
-      time: now.toTimeString().split(' ')[0],
+      date: dateStr,
+      time: timeStr,
       createdAt: serverTimestamp()
     });
 
@@ -377,24 +438,86 @@ window.submitBet = async () => {
       userId: currentUser.uid,
       type: 'Bet Placed',
       amount: -amount,
-      description: `Bet on #${selectedMain} | Harup ${selectedHarup}`,
+      description: `Bet on ${singleSelection.type.toUpperCase()} #${singleSelection.number}`,
       createdAt: serverTimestamp()
     });
 
-    showToast(`Bet placed! ₹${amount} on number ${selectedMain}`, 'success');
-    selectedMain = null; selectedHarup = null;
-    document.getElementById('betAmount').value = '';
-    document.querySelectorAll('.num-btn, .harup-btn').forEach(b => b.classList.remove('selected'));
-    updateBetSummary();
-    addNotification('Bet Placed', `Your bet of ₹${amount} on #${selectedMain} has been placed`);
-  } catch (e) {
-    showToast('Failed to place bet: ' + e.message, 'error');
-  } finally {
-    btn.disabled = false; btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg> Submit Bet';
+    showToast(`✅ Bet placed successfully on ${singleSelection.type.toUpperCase()} ${singleSelection.number}!`, 'success');
+    addNotification('Bet Placed', `Your bet of ₹${amount} on ${singleSelection.type.toUpperCase()} #${singleSelection.number} has been placed`);
+    
+    document.getElementById('singleBetAmount').value = '';
+    singleSelection = null;
+    updateGridUI();
+    document.getElementById('singleSelectedText').innerText = "Select a Jodi or Harup Number";
+    
+  } catch(e) {
+    console.error(e);
+    showToast("❌ Error placing bet.", 'error');
   }
 };
 
-// ─── LOAD ACTIVE BETS ─────────────────────────────────────────────────
+// ─── SUBMIT MULTIPLE BETS ─────────────────────────────────────────────
+window.submitMultiBets = async function() {
+  if (!currentUser || !userData) return showToast('Please login first', 'error');
+  if (multiSelection.length === 0) return showToast("❌ Bet slip is empty!", 'error');
+  
+  let totalAmt = parseInt(document.getElementById('multiTotalAmt').innerText);
+  if (totalAmt === 0) return showToast("❌ Please enter amount for all bets!", 'error');
+  if ((userData.walletBalance || 0) < totalAmt) return showToast("❌ Insufficient Wallet Balance!", 'error');
+
+  let minB = gameSettings.minBet || 10;
+  for (let item of multiSelection) {
+    let amt = parseInt(item.amount);
+    if (isNaN(amt) || amt < minB) return showToast(`❌ Minimum bet is ₹${minB}. Check amount for ${item.type} ${item.number}`, 'error');
+  }
+
+  try {
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0];
+    const timeStr = now.toTimeString().split(' ')[0];
+
+    for (let item of multiSelection) {
+      await addDoc(collection(db, 'bets'), {
+        userId: currentUser.uid,
+        userName: currentUser.displayName,
+        userEmail: currentUser.email,
+        type: item.type,
+        number: item.number,
+        amount: parseInt(item.amount),
+        status: 'pending',
+        date: dateStr,
+        time: timeStr,
+        createdAt: serverTimestamp()
+      });
+    }
+
+    await updateDoc(doc(db, 'users', currentUser.uid), {
+      walletBalance: increment(-totalAmt),
+      totalBets: increment(multiSelection.length)
+    });
+
+    await addDoc(collection(db, 'wallet_transactions'), {
+      userId: currentUser.uid,
+      type: 'Multiple Bets Placed',
+      amount: -totalAmt,
+      description: `Placed ${multiSelection.length} bets from cart`,
+      createdAt: serverTimestamp()
+    });
+
+    showToast(`✅ All ${multiSelection.length} bets placed! Total Paid: ₹${totalAmt}`, 'success');
+    addNotification('Bets Placed', `Placed ${multiSelection.length} bets successfully for ₹${totalAmt}`);
+    
+    multiSelection = [];
+    updateMultiCartUI();
+    updateGridUI();
+
+  } catch(e) {
+    console.error(e);
+    showToast("❌ Error placing multiple bets.", 'error');
+  }
+};
+
+// ─── LOAD ACTIVE BETS (UPDATED FOR NEW SCHEMA) ────────────────────────
 async function loadActiveBets() {
   if (!currentUser) return;
   const snap = await getDocs(query(collection(db, 'bets'), where('userId', '==', currentUser.uid), orderBy('createdAt', 'desc'), limit(5)));
@@ -405,14 +528,15 @@ async function loadActiveBets() {
   }
   el.innerHTML = snap.docs.map(d => {
     const b = d.data();
+    const typeLabel = b.type === 'main' ? 'JODI' : 'HARUP';
     return `<div class="bet-item">
       <div>
-        <div class="bet-num">${b.mainNumber}</div>
-        <div class="bet-meta">Harup: ${b.harupNumber} | ${b.date}</div>
+        <div class="bet-num">${typeLabel} - ${b.number}</div>
+        <div class="bet-meta">${b.date || ''}</div>
       </div>
       <div style="text-align:right">
         <div class="bet-amount">₹${b.amount}</div>
-        <span class="bet-status ${b.status === 'win' ? 'bs-win' : b.status === 'lose' ? 'bs-lose' : 'bs-pending'}">${b.status.toUpperCase()}</span>
+        <span class="bet-status ${b.status === 'won' ? 'bs-win' : b.status === 'lost' ? 'bs-lose' : 'bs-pending'}">${b.status.toUpperCase()}</span>
       </div>
     </div>`;
   }).join('');
@@ -441,7 +565,7 @@ async function loadTransactions() {
   }).join('');
 }
 
-// ─── HISTORY ─────────────────────────────────────────────────────────
+// ─── HISTORY (UPDATED FOR NEW SCHEMA) ─────────────────────────────────
 window.switchHistoryTab = (tab) => {
   currentHistoryTab = tab;
   document.querySelectorAll('.htab').forEach(b => b.classList.toggle('active', b.textContent.toLowerCase() === tab));
@@ -458,14 +582,15 @@ async function loadHistory(tab) {
     if (snap.empty) { el.innerHTML = '<div class="empty-state"><p>No bet history</p></div>'; return; }
     el.innerHTML = snap.docs.map(d => {
       const b = d.data();
+      const typeLabel = b.type === 'main' ? 'Jodi' : 'Harup';
       return `<div class="history-item">
         <div class="hi-left">
-          <div class="hi-title">Number: ${b.mainNumber} | Harup: ${b.harupNumber}</div>
+          <div class="hi-title">${typeLabel}: ${b.number}</div>
           <div class="hi-sub">${b.date} ${b.time}</div>
         </div>
         <div class="hi-right">
-          <div class="hi-amount" style="color:${b.status === 'win' ? 'var(--green)' : 'var(--text-primary)'}">₹${b.amount}</div>
-          <div class="hi-status" style="color:${b.status === 'win' ? 'var(--green)' : b.status === 'lose' ? 'var(--red)' : 'var(--gold)'}">${b.status.toUpperCase()}</div>
+          <div class="hi-amount" style="color:${b.status === 'won' ? 'var(--green)' : 'var(--text-primary)'}">₹${b.amount}</div>
+          <div class="hi-status" style="color:${b.status === 'won' ? 'var(--green)' : b.status === 'lost' ? 'var(--red)' : 'var(--gold)'}">${b.status.toUpperCase()}</div>
         </div>
       </div>`;
     }).join('');
