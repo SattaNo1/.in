@@ -1,4 +1,5 @@
 
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -11,13 +12,105 @@
 <meta name="apple-mobile-web-app-title" content="Satta No.1">
 <title>Satta No.1</title>
 <link rel="manifest" href="manifest.json">
-<!-- Update: Removed 'icons/' folder path -->
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@400;700;900&family=Noto+Sans:wght@300;400;500&display=swap" rel="stylesheet">
-<!-- Update: Removed 'css/' folder path -->
 <link rel="stylesheet" href="main.css">
+<style>
+  /* =========================================
+     NEW MULTI-BET CART STYLES
+     ========================================= */
+  .number-grid .num-btn.selected, .harup-grid .harup-btn.selected {
+    background: #f5c518 !important; 
+    color: #000 !important; 
+    border-color: #f5c518 !important; 
+    font-weight: bold;
+    transform: scale(1.1);
+  }
+  
+  .bet-cart-list {
+    margin-top: 10px;
+    max-height: 250px;
+    overflow-y: auto;
+  }
+  
+  .cart-item {
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center;
+    background: rgba(255,255,255,0.05); 
+    border: 1px solid rgba(245, 197, 24, 0.3);
+    padding: 10px; 
+    border-radius: 8px; 
+    margin-bottom: 8px;
+  }
+  
+  .cart-item-info {
+    display: flex; 
+    flex-direction: column;
+  }
+  
+  .cart-item-title {
+    font-weight: bold; 
+    color: #f5c518; 
+    font-size: 15px;
+  }
+  
+  .cart-item-sub {
+    font-size: 11px; 
+    color: #aaa; 
+    text-transform: uppercase;
+  }
+  
+  .cart-item-right {
+    display: flex; 
+    align-items: center; 
+    gap: 8px;
+  }
+  
+  .cart-amt-input {
+    width: 80px; 
+    padding: 8px; 
+    border-radius: 4px; 
+    border: 1px solid #f5c518;
+    background: #000; 
+    color: #fff; 
+    text-align: center; 
+    outline: none;
+    font-weight: bold;
+  }
+  
+  .cart-amt-input:focus {
+    box-shadow: 0 0 5px #f5c518;
+  }
+  
+  .cart-remove-btn {
+    background: #ff4444; 
+    color: #fff; 
+    border: none; 
+    border-radius: 4px;
+    width: 28px; 
+    height: 28px; 
+    font-weight: bold; 
+    cursor: pointer; 
+    display: flex;
+    align-items: center; 
+    justify-content: center;
+  }
+
+  .cart-total-box {
+    display: flex;
+    justify-content: space-between;
+    background: #f5c518;
+    color: #000;
+    padding: 12px;
+    border-radius: 8px;
+    font-weight: bold;
+    margin-top: 10px;
+    font-size: 16px;
+  }
+</style>
 </head>
 <body>
 
@@ -144,17 +237,6 @@
           </button>
         </div>
 
-        <!-- Install App Banner -->
-        <div class="install-banner hidden" id="installBanner">
-          <div class="install-icon">📱</div>
-          <div class="install-text">
-            <div class="install-title">Install Satta No.1</div>
-            <div class="install-sub">Get the full app experience</div>
-          </div>
-          <button class="install-btn" id="installBtn">Install</button>
-          <button class="install-close" onclick="this.parentElement.classList.add('hidden')">✕</button>
-        </div>
-
         <!-- Last 10 Results -->
         <div class="section-card">
           <div class="section-header">
@@ -182,41 +264,39 @@
       </div>
     </section>
 
-    <!-- PLAY PAGE -->
+    <!-- PLAY PAGE (UPDATED FOR MULTI-BETS) -->
     <section id="page-play" class="page-section hidden">
       <div class="page-content">
         <div class="page-head">
-          <div class="page-head-title">Place Your Bet</div>
-          <div class="page-head-sub">Select number, harup & amount</div>
+          <div class="page-head-title">Place Your Bets</div>
+          <div class="page-head-sub">Select single or multiple numbers to add to slip</div>
         </div>
 
         <div class="play-card">
-          <div class="play-section-label">MAIN NUMBER (1-100)</div>
+          <div class="play-section-label">MAIN JODI (1-100) <span style="font-size:11px; font-weight:normal; color:#aaa; float:right;">Tap to select multiple</span></div>
           <div class="number-grid" id="mainGrid"></div>
         </div>
 
         <div class="play-card">
-          <div class="play-section-label">HARUP NUMBER (1-9)</div>
+          <div class="play-section-label">HARUP (1-9) <span style="font-size:11px; font-weight:normal; color:#aaa; float:right;">Tap to select multiple</span></div>
           <div class="harup-grid" id="harupGrid"></div>
         </div>
 
-        <div class="play-card">
-          <div class="play-section-label">BET AMOUNT (Min ₹10)</div>
-          <div class="amount-row">
-            <div class="quick-amounts">
-              <button class="amt-chip" onclick="setAmount(10)">₹10</button>
-              <button class="amt-chip" onclick="setAmount(50)">₹50</button>
-              <button class="amt-chip" onclick="setAmount(100)">₹100</button>
-              <button class="amt-chip" onclick="setAmount(500)">₹500</button>
-            </div>
-            <input type="number" id="betAmount" class="amount-input" placeholder="Enter amount" min="10">
+        <!-- NEW BET CART (SLIP) SECTION -->
+        <div class="play-card" id="cartSection" style="display:none;">
+          <div class="play-section-label" style="color:var(--gold);">YOUR BET SLIP</div>
+          <div id="betCartList" class="bet-cart-list">
+            <!-- JS dynamically injects selected bets here -->
           </div>
-          <div class="bet-summary" id="betSummary">Select number, harup and enter amount</div>
+          <div class="cart-total-box">
+            <span>Total Bets: <span id="cartTotalBets">0</span></span>
+            <span>Pay: ₹<span id="cartTotalAmount">0</span></span>
+          </div>
         </div>
 
-        <button class="submit-bet-btn" id="submitBetBtn" onclick="submitBet()">
+        <button class="submit-bet-btn" id="submitBetBtn" onclick="submitMultipleBets()" style="display:none;">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-          Submit Bet
+          Confirm & Pay
         </button>
       </div>
     </section>
@@ -483,7 +563,6 @@
 </div>
 
 <!-- FIREBASE -->
-<!-- Update: Removed 'js/' folder path -->
 <script type="module" src="firebase.js"></script>
 <script type="module" src="app.js"></script>
 <script>
